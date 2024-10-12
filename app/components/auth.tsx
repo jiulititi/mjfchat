@@ -12,16 +12,9 @@ import { getClientConfig } from "../config/client";
 
 export function AuthPage() {
   const navigate = useNavigate();
-  const accessStore = useAccessStore();
+  const access = useAccessStore();
 
   const goHome = () => navigate(Path.Home);
-  const goChat = () => navigate(Path.Chat);
-  const resetAccessCode = () => {
-    accessStore.update((access) => {
-      access.openaiApiKey = "";
-      access.accessCode = "";
-    });
-  }; // Reset access code to empty string
 
   useEffect(() => {
     if (getClientConfig()?.isApp) {
@@ -43,54 +36,19 @@ export function AuthPage() {
         className={styles["auth-input"]}
         type="password"
         placeholder={Locale.Auth.Input}
-        value={accessStore.accessCode}
+        value={access.accessCode}
         onChange={(e) => {
-          accessStore.update(
-            (access) => (access.accessCode = e.currentTarget.value),
-          );
+          access.updateCode(e.currentTarget.value);
         }}
       />
-      {!accessStore.hideUserApiKey ? (
-        <>
-          <div className={styles["auth-tips"]}>{Locale.Auth.SubTips}</div>
-          <input
-            className={styles["auth-input"]}
-            type="password"
-            placeholder={Locale.Settings.Access.OpenAI.ApiKey.Placeholder}
-            value={accessStore.openaiApiKey}
-            onChange={(e) => {
-              accessStore.update(
-                (access) => (access.openaiApiKey = e.currentTarget.value),
-              );
-            }}
-          />
-          <input
-            className={styles["auth-input"]}
-            type="password"
-            placeholder={Locale.Settings.Access.Google.ApiKey.Placeholder}
-            value={accessStore.googleApiKey}
-            onChange={(e) => {
-              accessStore.update(
-                (access) => (access.googleApiKey = e.currentTarget.value),
-              );
-            }}
-          />
-        </>
-      ) : null}
 
       <div className={styles["auth-actions"]}>
         <IconButton
           text={Locale.Auth.Confirm}
           type="primary"
-          onClick={goChat}
+          onClick={goHome}
         />
-        <IconButton
-          text={Locale.Auth.Later}
-          onClick={() => {
-            resetAccessCode();
-            goHome();
-          }}
-        />
+        <IconButton text={Locale.Auth.Later} onClick={goHome} />
       </div>
     </div>
   );

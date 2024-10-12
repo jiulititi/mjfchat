@@ -1,55 +1,23 @@
-import {
-  ApiPath,
-  DEFAULT_API_HOST,
-  ServiceProvider,
-  StoreKey,
-} from "../constant";
+import { DEFAULT_API_HOST, DEFAULT_MODELS, StoreKey } from "../constant";
 import { getHeaders } from "../client/api";
 import { getClientConfig } from "../config/client";
 import { createPersistStore } from "../utils/store";
-import { ensure } from "../utils/clone";
-import { DEFAULT_CONFIG } from "./config";
 
 let fetchState = 0; // 0 not fetch, 1 fetching, 2 done
 
 const DEFAULT_OPENAI_URL =
-  getClientConfig()?.buildMode === "export"
-    ? DEFAULT_API_HOST + "/api/proxy/openai"
-    : ApiPath.OpenAI;
+  getClientConfig()?.buildMode === "export" ? DEFAULT_API_HOST : "/api/openai/";
+console.log("[API] default openai url", DEFAULT_OPENAI_URL);
 
 const DEFAULT_ACCESS_STATE = {
+  token: "",
   accessCode: "",
-  useCustomConfig: false,
-
-  provider: ServiceProvider.OpenAI,
-
-  // openai
-  openaiUrl: DEFAULT_OPENAI_URL,
-  openaiApiKey: "",
-
-  // azure
-  azureUrl: "",
-  azureApiKey: "",
-  azureApiVersion: "2023-08-01-preview",
-
-  // google ai studio
-  googleUrl: "",
-  googleApiKey: "",
-  googleApiVersion: "v1",
-
-  // anthropic
-  anthropicApiKey: "",
-  anthropicApiVersion: "2023-06-01",
-  anthropicUrl: "",
-
-  // server config
   needCode: true,
   hideUserApiKey: false,
   hideBalanceQuery: false,
   disableGPT4: false,
-  disableFastLink: false,
-  customModels: "",
-  defaultModel: "",
+
+  openaiUrl: DEFAULT_OPENAI_URL,
 };
 
 export const useAccessStore = createPersistStore(
@@ -61,34 +29,21 @@ export const useAccessStore = createPersistStore(
 
       return get().needCode;
     },
-
-    isValidOpenAI() {
-      return ensure(get(), ["openaiApiKey"]);
+    updateCode(code: string) {
+      set(() => ({ accessCode: code?.trim() }));
     },
-
-    isValidAzure() {
-      return ensure(get(), ["azureUrl", "azureApiKey", "azureApiVersion"]);
+    updateToken(token: string) {
+      set(() => ({ token: token?.trim() }));
     },
-
-    isValidGoogle() {
-      return ensure(get(), ["googleApiKey"]);
+    updateOpenAiUrl(url: string) {
+      set(() => ({ openaiUrl: url?.trim() }));
     },
-
-    isValidAnthropic() {
-      return ensure(get(), ["anthropicApiKey"]);
-    },
-
     isAuthorized() {
       this.fetch();
 
       // has token or has code or disabled access control
       return (
-        this.isValidOpenAI() ||
-        this.isValidAzure() ||
-        this.isValidGoogle() ||
-        this.isValidAnthropic() ||
-        !this.enabledAccessControl() ||
-        (this.enabledAccessControl() && ensure(get(), ["accessCode"]))
+        !!get().token || !!get().accessCode || !this.enabledAccessControl()
       );
     },
     fetch() {
@@ -102,16 +57,15 @@ export const useAccessStore = createPersistStore(
         },
       })
         .then((res) => res.json())
-        .then((res) => {
-          // Set default model from env request
-          let defaultModel = res.defaultModel ?? "";
-          DEFAULT_CONFIG.modelConfig.model =
-            defaultModel !== "" ? defaultModel : "gpt-3.5-turbo";
-          return res;
-        })
         .then((res: DangerConfig) => {
           console.log("[Config] got config from server", res);
           set(() => ({ ...res }));
+
+          if (res.disableGPT4) {
+            DEFAULT_MODELS.forEach(
+              (m: any) => (m.available = !m.name.startsWith("gpt-4")),
+            );
+          }
         })
         .catch(() => {
           console.error("[Config] failed to fetch config");
@@ -123,20 +77,6 @@ export const useAccessStore = createPersistStore(
   }),
   {
     name: StoreKey.Access,
-    version: 2,
-    migrate(persistedState, version) {
-      if (version < 2) {
-        const state = persistedState as {
-          token: string;
-          openaiApiKey: string;
-          azureApiVersion: string;
-          googleApiKey: string;
-        };
-        state.openaiApiKey = state.token;
-        state.azureApiVersion = "2023-08-01-preview";
-      }
-
-      return persistedState as any;
-    },
+    version: 1,
   },
 );

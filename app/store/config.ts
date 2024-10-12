@@ -1,11 +1,6 @@
 import { LLMModel } from "../client/api";
 import { getClientConfig } from "../config/client";
-import {
-  DEFAULT_INPUT_TEMPLATE,
-  DEFAULT_MODELS,
-  DEFAULT_SIDEBAR_WIDTH,
-  StoreKey,
-} from "../constant";
+import { DEFAULT_INPUT_TEMPLATE, DEFAULT_MODELS, StoreKey } from "../constant";
 import { createPersistStore } from "../utils/store";
 
 export type ModelType = (typeof DEFAULT_MODELS)[number]["name"];
@@ -24,19 +19,17 @@ export enum Theme {
   Light = "light",
 }
 
-const config = getClientConfig();
-
 export const DEFAULT_CONFIG = {
   lastUpdate: Date.now(), // timestamp, to merge state
 
-  submitKey: SubmitKey.Enter,
+  submitKey: SubmitKey.CtrlEnter as SubmitKey,
   avatar: "1f603",
   fontSize: 14,
   theme: Theme.Auto as Theme,
-  tightBorder: !!config?.isApp,
+  tightBorder: !!getClientConfig()?.isApp,
   sendPreviewBubble: true,
   enableAutoGenerateTitle: true,
-  sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
+  sidebarWidth: 300,
 
   disablePromptHint: false,
 
@@ -50,14 +43,14 @@ export const DEFAULT_CONFIG = {
     model: "gpt-3.5-turbo" as ModelType,
     temperature: 0.5,
     top_p: 1,
-    max_tokens: 4000,
+    max_tokens: 2000,
     presence_penalty: 0,
     frequency_penalty: 0,
     sendMemory: true,
     historyMessageCount: 4,
     compressMessageLengthThreshold: 1000,
     enableInjectSystemPrompts: true,
-    template: config?.template ?? DEFAULT_INPUT_TEMPLATE,
+    template: DEFAULT_INPUT_TEMPLATE,
   },
 };
 
@@ -71,7 +64,7 @@ export function limitNumber(
   max: number,
   defaultValue: number,
 ) {
-  if (isNaN(x)) {
+  if (typeof x !== "number" || isNaN(x)) {
     return defaultValue;
   }
 
@@ -83,7 +76,7 @@ export const ModalConfigValidator = {
     return x as ModelType;
   },
   max_tokens(x: number) {
-    return limitNumber(x, 0, 512000, 1024);
+    return limitNumber(x, 0, 100000, 2000);
   },
   presence_penalty(x: number) {
     return limitNumber(x, -2, 2, 0);
@@ -92,7 +85,7 @@ export const ModalConfigValidator = {
     return limitNumber(x, -2, 2, 0);
   },
   temperature(x: number) {
-    return limitNumber(x, 0, 2, 1);
+    return limitNumber(x, 0, 1, 1);
   },
   top_p(x: number) {
     return limitNumber(x, 0, 1, 1);
@@ -129,11 +122,19 @@ export const useAppConfig = createPersistStore(
       }));
     },
 
-    allModels() {},
+    allModels() {
+      const customModels = get()
+        .customModels.split(",")
+        .filter((v) => !!v && v.length > 0)
+        .map((m) => ({ name: m, available: true }));
+
+      const models = get().models.concat(customModels);
+      return models;
+    },
   }),
   {
     name: StoreKey.Config,
-    version: 3.9,
+    version: 3.8,
     migrate(persistedState, version) {
       const state = persistedState as ChatConfig;
 
@@ -162,13 +163,6 @@ export const useAppConfig = createPersistStore(
 
       if (version < 3.8) {
         state.lastUpdate = Date.now();
-      }
-
-      if (version < 3.9) {
-        state.modelConfig.template =
-          state.modelConfig.template !== DEFAULT_INPUT_TEMPLATE
-            ? state.modelConfig.template
-            : config?.template ?? DEFAULT_INPUT_TEMPLATE;
       }
 
       return state as any;

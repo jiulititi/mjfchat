@@ -1,19 +1,15 @@
-import { getClientConfig } from "../config/client";
 import { Updater } from "../typing";
-import { ApiPath, STORAGE_KEY, StoreKey } from "../constant";
+import { StoreKey } from "../constant";
 import { createPersistStore } from "../utils/store";
 import {
   AppState,
   getLocalAppState,
-  GetStoreState,
   mergeAppState,
   setLocalAppState,
 } from "../utils/sync";
 import { downloadAs, readFromFile } from "../utils";
 import { showToast } from "../components/ui-lib";
 import Locale from "../locales";
-import { createSyncClient, ProviderType } from "../utils/cloud";
-import { corsPath } from "../utils/cors";
 
 export interface WebDavConfig {
   server: string;
@@ -21,52 +17,22 @@ export interface WebDavConfig {
   password: string;
 }
 
-const isApp = !!getClientConfig()?.isApp;
-export type SyncStore = GetStoreState<typeof useSyncStore>;
-
-const DEFAULT_SYNC_STATE = {
-  provider: ProviderType.WebDAV,
-  useProxy: true,
-  proxyUrl: corsPath(ApiPath.Cors),
-
-  webdav: {
-    endpoint: "",
-    username: "",
-    password: "",
-  },
-
-  upstash: {
-    endpoint: "",
-    username: STORAGE_KEY,
-    apiKey: "",
-  },
-
-  lastSyncTime: 0,
-  lastProvider: "",
-};
-
 export const useSyncStore = createPersistStore(
-  DEFAULT_SYNC_STATE,
+  {
+    webDavConfig: {
+      server: "",
+      username: "",
+      password: "",
+    },
+
+    lastSyncTime: 0,
+  },
   (set, get) => ({
-    cloudSync() {
-      const config = get()[get().provider];
-      return Object.values(config).every((c) => c.toString().length > 0);
-    },
-
-    markSyncTime() {
-      set({ lastSyncTime: Date.now(), lastProvider: get().provider });
-    },
-
     export() {
       const state = getLocalAppState();
-      const datePart = isApp
-        ? `${new Date().toLocaleDateString().replace(/\//g, "_")} ${new Date()
-            .toLocaleTimeString()
-            .replace(/:/g, "_")}`
-        : new Date().toLocaleString();
-
-      const fileName = `Backup-${datePart}.json`;
+      const fileName = `Backup-${new Date().toLocaleString()}.json`;
       downloadAs(JSON.stringify(state), fileName);
+      set({ lastSyncTime: Date.now() });
     },
 
     async import() {
@@ -84,67 +50,51 @@ export const useSyncStore = createPersistStore(
       }
     },
 
-    getClient() {
-      const provider = get().provider;
-      const client = createSyncClient(provider, get());
-      return client;
+    async check() {
+      try {
+        const res = await fetch(this.path(""), {
+          method: "PROFIND",
+          headers: this.headers(),
+        });
+        const sanitizedRes = {
+          status: res.status,
+          statusText: res.statusText,
+          headers: res.headers,
+        };
+        console.log(sanitizedRes);
+        return res.status === 207;
+      } catch (e) {
+        console.error("[Sync] ", e);
+        return false;
+      }
     },
 
-    async sync() {
-      const localState = getLocalAppState();
-      const provider = get().provider;
-      const config = get()[provider];
-      const client = this.getClient();
+    path(path: string) {
+      let url = get().webDavConfig.server;
 
-      try {
-        const remoteState = await client.get(config.username);
-        if (!remoteState || remoteState === "") {
-          await client.set(config.username, JSON.stringify(localState));
-          console.log("[Sync] Remote state is empty, using local state instead.");
-          return
-        } else {
-          const parsedRemoteState = JSON.parse(
-            await client.get(config.username),
-          ) as AppState;
-          mergeAppState(localState, parsedRemoteState);
-          setLocalAppState(localState);
-       } 
-      } catch (e) {
-        console.log("[Sync] failed to get remote state", e);
-        throw e;
+      if (!url.endsWith("/")) {
+        url += "/";
       }
 
-      await client.set(config.username, JSON.stringify(localState));
+      if (path.startsWith("/")) {
+        path = path.slice(1);
+      }
 
-      this.markSyncTime();
+      return url + path;
     },
 
-    async check() {
-      const client = this.getClient();
-      return await client.check();
+    headers() {
+      const auth = btoa(
+        [get().webDavConfig.username, get().webDavConfig.password].join(":"),
+      );
+
+      return {
+        Authorization: `Basic ${auth}`,
+      };
     },
   }),
   {
     name: StoreKey.Sync,
-    version: 1.2,
-
-    migrate(persistedState, version) {
-      const newState = persistedState as typeof DEFAULT_SYNC_STATE;
-
-      if (version < 1.1) {
-        newState.upstash.username = STORAGE_KEY;
-      }
-
-      if (version < 1.2) {
-        if (
-          (persistedState as typeof DEFAULT_SYNC_STATE).proxyUrl ===
-          "/api/cors/"
-        ) {
-          newState.proxyUrl = "";
-        }
-      }
-
-      return newState as any;
-    },
+    version: 1,
   },
 );

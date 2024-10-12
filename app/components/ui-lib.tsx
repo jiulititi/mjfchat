@@ -26,10 +26,10 @@ export function Popover(props: {
     <div className={styles.popover}>
       {props.children}
       {props.open && (
-        <div className={styles["popover-mask"]} onClick={props.onClose}></div>
-      )}
-      {props.open && (
-        <div className={styles["popover-content"]}>{props.content}</div>
+        <div className={styles["popover-content"]}>
+          <div className={styles["popover-mask"]} onClick={props.onClose}></div>
+          {props.content}
+        </div>
       )}
     </div>
   );
@@ -70,12 +70,14 @@ export function ListItem(props: {
   );
 }
 
-export function List(props: { children: React.ReactNode; id?: string }) {
-  return (
-    <div className={styles.list} id={props.id}>
-      {props.children}
-    </div>
-  );
+export function List(props: {
+  children:
+    | Array<JSX.Element | null | undefined>
+    | JSX.Element
+    | null
+    | undefined;
+}) {
+  return <div className={styles.list}>{props.children}</div>;
 }
 
 export function Loading() {
@@ -97,9 +99,8 @@ export function Loading() {
 interface ModalProps {
   title: string;
   children?: any;
-  actions?: React.ReactNode[];
+  actions?: JSX.Element[];
   defaultMax?: boolean;
-  footer?: React.ReactNode;
   onClose?: () => void;
 }
 export function Modal(props: ModalProps) {
@@ -148,7 +149,6 @@ export function Modal(props: ModalProps) {
       <div className={styles["modal-content"]}>{props.children}</div>
 
       <div className={styles["modal-footer"]}>
-        {props.footer}
         <div className={styles["modal-actions"]}>
           {props.actions?.map((action, i) => (
             <div key={i} className={styles["modal-action"]}>

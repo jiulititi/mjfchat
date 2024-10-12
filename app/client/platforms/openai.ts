@@ -1,22 +1,12 @@
-"use client";
 import {
-  ApiPath,
   DEFAULT_API_HOST,
   DEFAULT_MODELS,
   OpenaiPath,
   REQUEST_TIMEOUT_MS,
-  ServiceProvider,
 } from "@/app/constant";
 import { useAccessStore, useAppConfig, useChatStore } from "@/app/store";
 
-import {
-  ChatOptions,
-  getHeaders,
-  LLMApi,
-  LLMModel,
-  LLMUsage,
-  MultimodalContent,
-} from "../api";
+import { ChatOptions, getHeaders, LLMApi, LLMModel, LLMUsage } from "../api";
 import Locale from "../../locales";
 import {
   EventStreamContentType,
@@ -24,12 +14,6 @@ import {
 } from "@fortaine/fetch-event-source";
 import { prettyObject } from "@/app/utils/format";
 import { getClientConfig } from "@/app/config/client";
-import { makeAzurePath } from "@/app/azure";
-import {
-  getMessageTextContent,
-  getMessageImages,
-  isVisionModel,
-} from "@/app/utils";
 
 export interface OpenAIListModelResponse {
   object: string;
@@ -40,61 +24,24 @@ export interface OpenAIListModelResponse {
   }>;
 }
 
-interface RequestPayload {
-  messages: {
-    role: "system" | "user" | "assistant";
-    content: string | MultimodalContent[];
-  }[];
-  stream?: boolean;
-  model: string;
-  temperature: number;
-  presence_penalty: number;
-  frequency_penalty: number;
-  top_p: number;
-  max_tokens?: number;
-}
-
 export class ChatGPTApi implements LLMApi {
   private disableListModels = true;
 
   path(path: string): string {
-    const accessStore = useAccessStore.getState();
+    let openaiUrl = useAccessStore.getState().openaiUrl;
+    const apiPath = "/api/openai";
 
-    let baseUrl = "";
-
-    if (accessStore.useCustomConfig) {
-      const isAzure = accessStore.provider === ServiceProvider.Azure;
-
-      if (isAzure && !accessStore.isValidAzure()) {
-        throw Error(
-          "incomplete azure config, please check it in your settings page",
-        );
-      }
-
-      if (isAzure) {
-        path = makeAzurePath(path, accessStore.azureApiVersion);
-      }
-
-      baseUrl = isAzure ? accessStore.azureUrl : accessStore.openaiUrl;
-    }
-
-    if (baseUrl.length === 0) {
+    if (openaiUrl.length === 0) {
       const isApp = !!getClientConfig()?.isApp;
-      baseUrl = isApp
-        ? DEFAULT_API_HOST + "/proxy" + ApiPath.OpenAI
-        : ApiPath.OpenAI;
+      openaiUrl = isApp ? DEFAULT_API_HOST : apiPath;
     }
-
-    if (baseUrl.endsWith("/")) {
-      baseUrl = baseUrl.slice(0, baseUrl.length - 1);
+    if (openaiUrl.endsWith("/")) {
+      openaiUrl = openaiUrl.slice(0, openaiUrl.length - 1);
     }
-    if (!baseUrl.startsWith("http") && !baseUrl.startsWith(ApiPath.OpenAI)) {
-      baseUrl = "https://" + baseUrl;
+    if (!openaiUrl.startsWith("http") && !openaiUrl.startsWith(apiPath)) {
+      openaiUrl = "https://" + openaiUrl;
     }
-
-    console.log("[Proxy Endpoint] ", baseUrl, path);
-
-    return [baseUrl, path].join("/");
+    return [openaiUrl, path].join("/");
   }
 
   extractMessage(res: any) {
@@ -102,10 +49,9 @@ export class ChatGPTApi implements LLMApi {
   }
 
   async chat(options: ChatOptions) {
-    const visionModel = isVisionModel(options.config.model);
     const messages = options.messages.map((v) => ({
       role: v.role,
-      content: visionModel ? v.content : getMessageTextContent(v),
+      content: v.content,
     }));
 
     const modelConfig = {
@@ -116,7 +62,7 @@ export class ChatGPTApi implements LLMApi {
       },
     };
 
-    const requestPayload: RequestPayload = {
+    const requestPayload = {
       messages,
       stream: options.config.stream,
       model: modelConfig.model,
@@ -124,14 +70,7 @@ export class ChatGPTApi implements LLMApi {
       presence_penalty: modelConfig.presence_penalty,
       frequency_penalty: modelConfig.frequency_penalty,
       top_p: modelConfig.top_p,
-      // max_tokens: Math.max(modelConfig.max_tokens, 1024),
-      // Please do not ask me why not send max_tokens, no reason, this param is just shit, I dont want to explain anymore.
     };
-
-    // add max_tokens to vision model
-    if (visionModel && modelConfig.model.includes("preview")) {
-      requestPayload["max_tokens"] = Math.max(modelConfig.max_tokens, 4000);
-    }
 
     console.log("[Request] openai payload: ", requestPayload);
 
@@ -156,38 +95,12 @@ export class ChatGPTApi implements LLMApi {
 
       if (shouldStream) {
         let responseText = "";
-        let remainText = "";
         let finished = false;
-
-        // animate response to make it looks smooth
-        function animateResponseText() {
-          if (finished || controller.signal.aborted) {
-            responseText += remainText;
-            console.log("[Response Animation] finished");
-            if (responseText?.length === 0) {
-              options.onError?.(new Error("empty response from server"));
-            }
-            return;
-          }
-
-          if (remainText.length > 0) {
-            const fetchCount = Math.max(1, Math.round(remainText.length / 60));
-            const fetchText = remainText.slice(0, fetchCount);
-            responseText += fetchText;
-            remainText = remainText.slice(fetchCount);
-            options.onUpdate?.(responseText, fetchText);
-          }
-
-          requestAnimationFrame(animateResponseText);
-        }
-
-        // start animaion
-        animateResponseText();
 
         const finish = () => {
           if (!finished) {
+            options.onFinish(responseText);
             finished = true;
-            options.onFinish(responseText + remainText);
           }
         };
 
@@ -242,27 +155,10 @@ export class ChatGPTApi implements LLMApi {
             const text = msg.data;
             try {
               const json = JSON.parse(text);
-              const choices = json.choices as Array<{
-                delta: { content: string };
-              }>;
-              const delta = choices[0]?.delta?.content;
-              const textmoderation = json?.prompt_filter_results;
-
+              const delta = json.choices[0].delta.content;
               if (delta) {
-                remainText += delta;
-              }
-
-              if (
-                textmoderation &&
-                textmoderation.length > 0 &&
-                ServiceProvider.Azure
-              ) {
-                const contentFilterResults =
-                  textmoderation[0]?.content_filter_results;
-                console.log(
-                  `[${ServiceProvider.Azure}] [Text Moderation] flagged categories result:`,
-                  contentFilterResults,
-                );
+                responseText += delta;
+                options.onUpdate?.(responseText, delta);
               }
             } catch (e) {
               console.error("[Request] parse error", text, msg);
@@ -379,11 +275,6 @@ export class ChatGPTApi implements LLMApi {
     return chatModels.map((m) => ({
       name: m.id,
       available: true,
-      provider: {
-        id: "openai",
-        providerName: "OpenAI",
-        providerType: "openai",
-      },
     }));
   }
 }
